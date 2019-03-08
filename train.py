@@ -1,3 +1,4 @@
+import argparse
 import time
 import torch.backends.cudnn as cudnn
 import torch.optim
@@ -9,7 +10,6 @@ from models import Encoder, DecoderWithAttention
 from datasets import *
 from utils import *
 from nltk.translate.bleu_score import corpus_bleu
-import argparse
 
 
 # Model parameters
