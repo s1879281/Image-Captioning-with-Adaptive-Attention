@@ -12,13 +12,11 @@ wget http://cs.stanford.edu/people/karpathy/deepimagesent/caption_datasets.zip
 ```
 
 You can feel free to choose MSCOCO, Flicker8k or Flicker30k datasets.
-Command to download MSCOCO dataset:
+
+You can use the following command to download these datasets:
 ```
 wget http://images.cocodataset.org/zips/train2014.zip
 wget http://images.cocodataset.org/zips/val2014.zip
-```
-Command to download Flickr8k and Flickr30k dataset:
-```
 wget http://nlp.cs.illinois.edu/HockenmaierGroup/Framing_Image_Description/Flickr8k_Dataset.zip
 wget http://shannon.cs.illinois.edu/DenotationGraph/data/index.html/flickr30k-images.tar
 ```
