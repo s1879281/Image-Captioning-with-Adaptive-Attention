@@ -128,6 +128,9 @@ def evaluate(args):
 
                     attention_weighted_encoding, _ = decoder.attention(encoder_out_sentinel, h)
 
+                    gate = decoder.sigmoid(decoder.f_beta(h))  # gating scalar, (batch_size_t, encoder_dim)
+                    attention_weighted_encoding = gate * attention_weighted_encoding
+
                     scores = decoder.fc(h) + decoder.fc_encoder(attention_weighted_encoding)
 
                 else:

@@ -95,6 +95,9 @@ def caption_image_beam_search(encoder, decoder, image_path, word_map, beam_size=
                 attention_weighted_encoding, alpha = decoder.attention(encoder_out_sentinel, h)
                 alpha = alpha[:,:-1].view(-1, enc_image_size, enc_image_size)
 
+                gate = decoder.sigmoid(decoder.f_beta(h))  # gating scalar, (batch_size_t, encoder_dim)
+                attention_weighted_encoding = gate * attention_weighted_encoding
+
                 scores = decoder.fc(h) + decoder.fc_encoder(attention_weighted_encoding)
 
             else:
@@ -219,7 +222,7 @@ def visualize_att(image_path, seq, alphas, rev_word_map, smooth=True):
 
 class Image_captioner():
 
-    def __init__(self, dataset='coco', checkpoint_folder='.', beam_size=5, smooth=True):
+    def __init__(self, dataset='coco', checkpoint_folder='best_checkpoint', beam_size=5, smooth=True):
         self.dataset = dataset
         self.checkpoint = torch.load(os.path.join(checkpoint_folder,
                                          'BEST_checkpoint_{:s}_5_cap_per_img_5_min_word_freq.pth.tar'.format(
@@ -252,7 +255,7 @@ class Image_captioner():
 
 if __name__ == '__main__':
     coco_captioner = Image_captioner('flickr8k')
-    image = 'test_image.jpg'
+    image = 'test_image2.jpg'
     seq, alphas, words = coco_captioner.generate_caption(image)
     # Visualize caption and attention of best sequence
     visualize_att(image, seq, alphas, coco_captioner.rev_word_map, coco_captioner.smooth)
