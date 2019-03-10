@@ -14,23 +14,6 @@ from scipy.misc import imread, imresize
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def get_args():
-    """
-    Define parameters for captioning.
-
-    :return: arguments
-    """
-    parser = argparse.ArgumentParser(description='Generate Caption')
-
-    parser.add_argument('--checkpoint_folder', '-cf', default='best_checkpoint', help='path to checkpoint')
-    parser.add_argument('--dataset', '-d', default='coco', help='dataset')
-    parser.add_argument('--img', '-i', default='test_image.jpg', help='path to image')
-    parser.add_argument('--beam_size', '-b', default=5, type=int, help='beam size for beam search')
-    parser.add_argument('--dont_smooth', dest='smooth', action='store_false', help='do not smooth alpha overlay')
-
-    args = parser.parse_args()
-    return args
-
 def caption_image_beam_search(encoder, decoder, image_path, word_map, beam_size=3):
     """
     Reads an image and captions it with beam search.
@@ -99,18 +82,49 @@ def caption_image_beam_search(encoder, decoder, image_path, word_map, beam_size=
 
         embeddings = decoder.embedding(k_prev_words).squeeze(1)  # (s, embed_dim)
 
-        awe, alpha = decoder.attention(encoder_out, h)  # (s, encoder_dim), (s, num_pixels)
+        try:
 
-        alpha = alpha.view(-1, enc_image_size, enc_image_size)  # (s, enc_image_size, enc_image_size)
+            if decoder.adaptive_att:
 
-        gate = decoder.sigmoid(decoder.f_beta(h))  # gating scalar, (s, encoder_dim)
-        awe = gate * awe
+                g_t = decoder.sigmoid(decoder.embedding_sentinel(embeddings) + decoder.decoder_sentinel(h))
+                s_t = g_t * torch.tanh(decoder.decoder_sentinel(c))
 
-        h, c = decoder.decode_step(torch.cat([embeddings, awe], dim=1), (h, c))  # (s, decoder_dim)
+                encoder_out_sentinel = torch.cat([encoder_out, s_t.unsqueeze(1)], dim=1)
+                h, c = decoder.decode_step_adaptive(embeddings, (h, c))  # (batch_size_t, decoder_dim)
 
-        scores = decoder.fc(h)  # (s, vocab_size)
+                attention_weighted_encoding, alpha = decoder.attention(encoder_out_sentinel, h)
+                alpha = alpha[:,:-1].view(-1, enc_image_size, enc_image_size)
+
+                scores = decoder.fc(h) + decoder.fc_encoder(attention_weighted_encoding)
+
+            else:
+
+                awe, alpha = decoder.attention(encoder_out, h)  # (s, encoder_dim), (s, num_pixels)
+
+                alpha = alpha.view(-1, enc_image_size, enc_image_size)  # (s, enc_image_size, enc_image_size)
+
+                gate = decoder.sigmoid(decoder.f_beta(h))  # gating scalar, (s, encoder_dim)
+                awe = gate * awe
+
+                h, c = decoder.decode_step(torch.cat([embeddings, awe], dim=1), (h, c))  # (s, decoder_dim)
+
+                scores = decoder.fc(h)  # (s, vocab_size)
+
+        except AttributeError:
+
+            awe, alpha = decoder.attention(encoder_out, h)  # (s, encoder_dim), (s, num_pixels)
+
+            alpha = alpha.view(-1, enc_image_size, enc_image_size)  # (s, enc_image_size, enc_image_size)
+
+            gate = decoder.sigmoid(decoder.f_beta(h))  # gating scalar, (s, encoder_dim)
+            awe = gate * awe
+
+            h, c = decoder.decode_step(torch.cat([embeddings, awe], dim=1), (h, c))  # (s, decoder_dim)
+
+            scores = decoder.fc(h)  # (s, vocab_size)
+
+
         scores = F.log_softmax(scores, dim=1)
-
         # Add
         scores = top_k_scores.expand_as(scores) + scores  # (s, vocab_size)
 
@@ -203,30 +217,42 @@ def visualize_att(image_path, seq, alphas, rev_word_map, smooth=True):
     plt.show()
 
 
+class Image_captioner():
+
+    def __init__(self, dataset='coco', checkpoint_folder='.', beam_size=5, smooth=True):
+        self.dataset = dataset
+        self.checkpoint = torch.load(os.path.join(checkpoint_folder,
+                                         'BEST_checkpoint_{:s}_5_cap_per_img_5_min_word_freq.pth.tar'.format(
+                                             self.dataset)))
+        self.beam_size = beam_size
+        self.smooth = smooth
+        self.decoder = self.checkpoint['decoder'].to(device)
+        self.encoder = self.checkpoint['encoder'].to(device)
+
+
+    def generate_caption(self, image):
+        # Load model
+        self.decoder.eval()
+        self.encoder.eval()
+
+        # Load word map (word2ix)
+        word_map_file = os.path.join('{:s}_folder'.format(self.dataset),
+                                     'WORDMAP_{:s}_5_cap_per_img_5_min_word_freq.json'.format(self.dataset))
+        with open(word_map_file, 'r') as j:
+            word_map = json.load(j)
+        self.rev_word_map = {v: k for k, v in word_map.items()}  # ix2word
+
+        # Encode, decode with attention and beam search
+        seq, alphas = caption_image_beam_search(self.encoder, self.decoder, image, word_map, self.beam_size)
+        alphas = torch.FloatTensor(alphas)
+        words = ' '.join([self.rev_word_map[ind] for ind in seq][1:-1])
+
+        return seq, alphas, words
+
+
 if __name__ == '__main__':
-    # Load arguments
-    args = get_args()
-
-    # Load model
-    checkpoint = torch.load(os.path.join(args.checkpoint_folder,
-                            'BEST_checkpoint_{:s}_5_cap_per_img_5_min_word_freq.pth.tar'.format(args.dataset)))
-    decoder = checkpoint['decoder']
-    decoder = decoder.to(device)
-    decoder.eval()
-    encoder = checkpoint['encoder']
-    encoder = encoder.to(device)
-    encoder.eval()
-
-    # Load word map (word2ix)
-    word_map_file = os.path.join('{:s}_folder'.format(args.dataset),
-                             'WORDMAP_{:s}_5_cap_per_img_5_min_word_freq.json'.format(args.dataset))
-    with open(word_map_file, 'r') as j:
-        word_map = json.load(j)
-    rev_word_map = {v: k for k, v in word_map.items()}  # ix2word
-
-    # Encode, decode with attention and beam search
-    seq, alphas = caption_image_beam_search(encoder, decoder, args.img, word_map, args.beam_size)
-    alphas = torch.FloatTensor(alphas)
-
+    coco_captioner = Image_captioner('flickr8k')
+    image = 'test_image.jpg'
+    seq, alphas, words = coco_captioner.generate_caption(image)
     # Visualize caption and attention of best sequence
-    visualize_att(args.img, seq, alphas, rev_word_map, args.smooth)
+    visualize_att(image, seq, alphas, coco_captioner.rev_word_map, coco_captioner.smooth)

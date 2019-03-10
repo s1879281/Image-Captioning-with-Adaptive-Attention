@@ -22,7 +22,7 @@ cudnn.benchmark = True  # set to true only if inputs to model are fixed size; ot
 
 # Training parameters
 start_epoch = 0
-epochs = 1  # number of epochs to train for (if early stopping is not triggered)
+epochs = 100  # number of epochs to train for (if early stopping is not triggered)
 epochs_since_improvement = 0  # keeps track of number of epochs since there's been an improvement in validation BLEU
 batch_size = 32
 workers = 1  # for data-loading; right now, only 1 works with h5py
@@ -56,7 +56,8 @@ def main(args):
                                        embed_dim=emb_dim,
                                        decoder_dim=decoder_dim,
                                        vocab_size=len(word_map),
-                                       dropout=dropout)
+                                       dropout=dropout,
+                                       adaptive_att=args.adaptive)
         decoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, decoder.parameters()),
                                              lr=decoder_lr)
         encoder = Encoder()
@@ -170,7 +171,6 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_
         # Forward prop.
         imgs = encoder(imgs)
         scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(imgs, caps, caplens)
-
         # Since we decoded starting with <start>, the targets are all words after <start>, up to <end>
         targets = caps_sorted[:, 1:]
 
@@ -326,6 +326,7 @@ def validate(val_loader, encoder, decoder, criterion):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Training')
-    parser.add_argument('--dataset', '-d', default='coco', help='dataset')
+    parser.add_argument('--dataset', '-d', default='flickr8k', help='dataset')
+    parser.add_argument('--adaptive', '-a', action='store_false', default=True, help='whether to use adaptive attention')
     args = parser.parse_args()
     main(args)

@@ -91,7 +91,7 @@ class DecoderWithAttention(nn.Module):
     Decoder.
     """
 
-    def __init__(self, attention_dim, embed_dim, decoder_dim, vocab_size, encoder_dim=2048, dropout=0.5):
+    def __init__(self, attention_dim, embed_dim, decoder_dim, vocab_size, encoder_dim=2048, dropout=0.5, adaptive_att=False):
         """
         :param attention_dim: size of attention network
         :param embed_dim: embedding size
@@ -119,6 +119,14 @@ class DecoderWithAttention(nn.Module):
         self.f_beta = nn.Linear(decoder_dim, encoder_dim)  # linear layer to create a sigmoid-activated gate
         self.sigmoid = nn.Sigmoid()
         self.fc = nn.Linear(decoder_dim, vocab_size)  # linear layer to find scores over vocabulary
+        self.adaptive_att = adaptive_att
+
+        if self.adaptive_att:
+            self.decode_step_adaptive = nn.LSTMCell(embed_dim, decoder_dim, bias=True)  # decoding LSTMCell
+            self.embedding_sentinel = nn.Linear(embed_dim, encoder_dim)  # linear layer to transform encoded image
+            self.decoder_sentinel = nn.Linear(decoder_dim, encoder_dim)  # linear layer to transform decoder's output
+            self.fc_encoder = nn.Linear(encoder_dim, vocab_size)  # linear layer to find scores over vocabulary
+
         self.init_weights()  # initialize some layers with the uniform distribution
 
     def init_weights(self):
@@ -128,6 +136,10 @@ class DecoderWithAttention(nn.Module):
         self.embedding.weight.data.uniform_(-0.1, 0.1)
         self.fc.bias.data.fill_(0)
         self.fc.weight.data.uniform_(-0.1, 0.1)
+
+        if self.adaptive_att:
+            self.fc_encoder.bias.data.fill_(0)
+            self.fc_encoder.weight.data.uniform_(-0.1, 0.1)
 
     def load_pretrained_embeddings(self, embeddings):
         """
@@ -200,15 +212,28 @@ class DecoderWithAttention(nn.Module):
         # then generate a new word in the decoder with the previous word and the attention weighted encoding
         for t in range(max(decode_lengths)):
             batch_size_t = sum([l > t for l in decode_lengths])
-            attention_weighted_encoding, alpha = self.attention(encoder_out[:batch_size_t],
-                                                                h[:batch_size_t])
-            gate = self.sigmoid(self.f_beta(h[:batch_size_t]))  # gating scalar, (batch_size_t, encoder_dim)
-            attention_weighted_encoding = gate * attention_weighted_encoding
-            h, c = self.decode_step(
-                torch.cat([embeddings[:batch_size_t, t, :], attention_weighted_encoding], dim=1),
-                (h[:batch_size_t], c[:batch_size_t]))  # (batch_size_t, decoder_dim)
-            preds = self.fc(self.dropout(h))  # (batch_size_t, vocab_size)
-            predictions[:batch_size_t, t, :] = preds
-            alphas[:batch_size_t, t, :] = alpha
+
+            if not self.adaptive_att:
+                attention_weighted_encoding, alpha = self.attention(encoder_out[:batch_size_t],
+                                                                    h[:batch_size_t])
+                gate = self.sigmoid(self.f_beta(h[:batch_size_t]))  # gating scalar, (batch_size_t, encoder_dim)
+                attention_weighted_encoding = gate * attention_weighted_encoding
+                h, c = self.decode_step(
+                    torch.cat([embeddings[:batch_size_t, t, :], attention_weighted_encoding], dim=1),
+                    (h[:batch_size_t], c[:batch_size_t]))  # (batch_size_t, decoder_dim)
+                preds = self.fc(self.dropout(h))  # (batch_size_t, vocab_size)
+                predictions[:batch_size_t, t, :] = preds
+                alphas[:batch_size_t, t, :] = alpha
+
+            else:
+                g_t = self.sigmoid(self.embedding_sentinel(embeddings[:batch_size_t, t, :]) + self.decoder_sentinel(h[:batch_size_t]))
+                s_t = g_t * torch.tanh(self.decoder_sentinel(c[:batch_size_t]))
+                encoder_out_sentinel = torch.cat([encoder_out[:batch_size_t], s_t.unsqueeze(1)], dim=1)
+                h, c = self.decode_step_adaptive(
+                    embeddings[:batch_size_t, t, :],(h[:batch_size_t], c[:batch_size_t]))  # (batch_size_t, decoder_dim)
+                attention_weighted_encoding, alpha = self.attention(encoder_out_sentinel[:batch_size_t], h[:batch_size_t])
+                preds = self.fc(self.dropout(h)) + self.fc_encoder(self.dropout(attention_weighted_encoding))
+                predictions[:batch_size_t, t, :] = preds
+                alphas[:batch_size_t, t, :] = alpha[:, :-1]
 
         return predictions, encoded_captions, decode_lengths, alphas, sort_ind
