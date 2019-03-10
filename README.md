@@ -18,7 +18,7 @@ You can use the following command to download these datasets:
 wget http://images.cocodataset.org/zips/train2014.zip
 wget http://images.cocodataset.org/zips/val2014.zip
 wget http://nlp.cs.illinois.edu/HockenmaierGroup/Framing_Image_Description/Flickr8k_Dataset.zip
-wget http://shannon.cs.illinois.edu/DenotationGraph/data/index.html/flickr30k-images.tar
+wget http://shannon.cs.illinois.edu/DenotationGraph/data/flickr30k-images.tar
 ```
 
 Thanks to [a-PyTorch-Tutorial-to-Image-Captioning](https://github.com/sgrvinod/a-PyTorch-Tutorial-to-Image-Captioning).
