@@ -226,14 +226,21 @@ class DecoderWithAttention(nn.Module):
                 alphas[:batch_size_t, t, :] = alpha
 
             else:
-                g_t = self.sigmoid(self.embedding_sentinel(embeddings[:batch_size_t, t, :]) + self.decoder_sentinel(h[:batch_size_t]))
+                # g_t = sigmoid(W_x * x_t + W_h * h_(t−1))
+                g_t = self.sigmoid(self.embedding_sentinel(self.dropout(embeddings[:batch_size_t, t, :]))
+                                   + self.decoder_sentinel(self.dropout(h[:batch_size_t])))    # (batch_size_t, embed_dim)
+
+                # s_t = g_t * tanh(c_t)
                 s_t = g_t * torch.tanh(self.decoder_sentinel(c[:batch_size_t]))
-                encoder_out_sentinel = torch.cat([encoder_out[:batch_size_t], s_t.unsqueeze(1)], dim=1)
+                encoder_out_sentinel = torch.cat([encoder_out[:batch_size_t], s_t.unsqueeze(1)], dim=1)   # (batch_size_t, num_pixels + 1, encoder_dim)
+
                 h, c = self.decode_step_adaptive(
                     embeddings[:batch_size_t, t, :],(h[:batch_size_t], c[:batch_size_t]))  # (batch_size_t, decoder_dim)
                 attention_weighted_encoding, alpha = self.attention(encoder_out_sentinel[:batch_size_t], h[:batch_size_t])
+
                 gate = self.sigmoid(self.f_beta(h[:batch_size_t]))  # gating scalar, (batch_size_t, encoder_dim)
                 attention_weighted_encoding = gate * attention_weighted_encoding
+
                 preds = self.fc(self.dropout(h)) + self.fc_encoder(self.dropout(attention_weighted_encoding))
                 predictions[:batch_size_t, t, :] = preds
                 alphas[:batch_size_t, t, :] = alpha[:, :-1]
