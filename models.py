@@ -186,7 +186,6 @@ class DecoderWithAttention(nn.Module):
 
         # Flatten image
         encoder_out = encoder_out.view(batch_size, -1, encoder_dim)  # (batch_size, num_pixels, encoder_dim)
-        encoder_out = self.dropout(encoder_out)
         num_pixels = encoder_out.size(1)
 
         # Sort input data by decreasing lengths; why? apparent below
@@ -196,7 +195,6 @@ class DecoderWithAttention(nn.Module):
 
         # Embedding
         embeddings = self.embedding(encoded_captions)  # (batch_size, max_caption_length, embed_dim)
-        embeddings = self.dropout(embeddings)
 
         # Initialize LSTM state
         h, c = self.init_hidden_state(encoder_out)  # (batch_size, decoder_dim)
@@ -229,8 +227,8 @@ class DecoderWithAttention(nn.Module):
 
             else:
                 # g_t = sigmoid(W_x * x_t + W_h * h_(t−1))
-                g_t = self.sigmoid(self.embedding_sentinel(embeddings[:batch_size_t, t, :])
-                                   + self.decoder_sentinel(h[:batch_size_t]))    # (batch_size_t, embed_dim)
+                g_t = self.sigmoid(self.embedding_sentinel(self.dropout(embeddings[:batch_size_t, t, :]))
+                                   + self.decoder_sentinel(self.dropout(h[:batch_size_t])))    # (batch_size_t, embed_dim)
 
                 # s_t = g_t * tanh(c_t)
                 s_t = g_t * torch.tanh(self.decoder_sentinel(c[:batch_size_t]))
