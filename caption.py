@@ -86,17 +86,13 @@ def caption_image_beam_search(encoder, decoder, image_path, word_map, beam_size=
 
             if decoder.adaptive_att:
 
-                g_t = decoder.sigmoid(decoder.embedding_sentinel(embeddings) + decoder.decoder_sentinel(h))
-                s_t = g_t * torch.tanh(decoder.decoder_sentinel(c))
+                g_t = decoder.sigmoid(decoder.affine_embed(embeddings) + decoder.affine_decoder(h))
+                s_t = g_t * torch.tanh(c)
 
-                encoder_out_sentinel = torch.cat([encoder_out, s_t.unsqueeze(1)], dim=1)
                 h, c = decoder.decode_step_adaptive(embeddings, (h, c))  # (batch_size_t, decoder_dim)
 
-                attention_weighted_encoding, alpha = decoder.attention(encoder_out_sentinel, h)
+                attention_weighted_encoding, alpha = decoder.adaptive_attention(encoder_out, h, s_t)
                 alpha = alpha[:,:-1].view(-1, enc_image_size, enc_image_size)
-
-                gate = decoder.sigmoid(decoder.f_beta(h))  # gating scalar, (batch_size_t, encoder_dim)
-                attention_weighted_encoding = gate * attention_weighted_encoding
 
                 scores = decoder.fc(h) + decoder.fc_encoder(attention_weighted_encoding)
 
@@ -222,7 +218,7 @@ def visualize_att(image_path, seq, alphas, rev_word_map, smooth=True):
 
 class Image_captioner():
 
-    def __init__(self, dataset='coco', checkpoint_folder='best_checkpoint', beam_size=5, smooth=True):
+    def __init__(self, dataset='coco', checkpoint_folder='.', beam_size=5, smooth=True):
         self.dataset = dataset
         self.checkpoint = torch.load(os.path.join(checkpoint_folder,
                                          'BEST_checkpoint_{:s}_5_cap_per_img_5_min_word_freq.pth.tar'.format(
@@ -254,8 +250,10 @@ class Image_captioner():
 
 
 if __name__ == '__main__':
-    coco_captioner = Image_captioner('flickr8k')
+    coco_captioner = Image_captioner(dataset='flickr30k', checkpoint_folder='best_checkpoint_dropout')
     image = 'test_image2.jpg'
     seq, alphas, words = coco_captioner.generate_caption(image)
+    alphas_data = alphas.view(-1, 196).sum(dim=1)
+    print(alphas_data)
     # Visualize caption and attention of best sequence
     visualize_att(image, seq, alphas, coco_captioner.rev_word_map, coco_captioner.smooth)

@@ -85,6 +85,45 @@ class Attention(nn.Module):
 
         return attention_weighted_encoding, alpha
 
+class Adaptive_Attention(Attention):
+    """
+    Adaptive Attention Network.
+    """
+
+    def __init__(self, encoder_dim, decoder_dim, attention_dim):
+        """
+        :param encoder_dim: feature size of encoded images
+        :param decoder_dim: size of decoder's RNN
+        :param attention_dim: size of the attention network
+        """
+        super(Adaptive_Attention, self).__init__(encoder_dim, decoder_dim, attention_dim)
+        self.sentinel_att = nn.Linear(decoder_dim, attention_dim)  # linear layer to transform decoder's output
+        self.affine_encoder = nn.Linear(decoder_dim, encoder_dim)  # linear layer to transform s_t
+        self.softmax = nn.Softmax(dim=1)  # softmax layer to calculate weights
+
+    def forward(self, encoder_out, decoder_hidden, s_t):
+        """
+        Forward propagation.
+
+        :param encoder_out: encoded images, a tensor of dimension (batch_size, num_pixels, encoder_dim)
+        :param decoder_hidden: previous decoder output, a tensor of dimension (batch_size, decoder_dim)
+        :param s_t: sentinel vector, a tensor of dimension (batch_size, decoder_dim)
+        :return: attention weighted encoding, weights
+        """
+        att1 = self.encoder_att(encoder_out)  # (batch_size, num_pixels, attention_dim)
+        att2 = self.decoder_att(decoder_hidden)  # (batch_size, attention_dim)
+        att = self.full_att(torch.tanh(att1 + att2.unsqueeze(1))).squeeze(2)  # (batch_size, num_pixels)
+        att_sentinel = self.full_att(torch.tanh(self.sentinel_att(s_t) + self.decoder_att(decoder_hidden)))
+        att = torch.cat([att, att_sentinel], dim=1)
+
+        alpha = self.softmax(att)  # (batch_size, num_pixels + 1)
+
+        # c_hat_t = beta * s_t + （1-beta）* c_t
+        attention_weighted_s_t = self.affine_encoder(s_t) * alpha[:, -1].unsqueeze(1)
+        attention_weighted_encoding = (encoder_out * alpha[:, :-1].unsqueeze(2)).sum(dim=1) + attention_weighted_s_t  # (batch_size, encoder_dim)
+
+        return attention_weighted_encoding, alpha
+
 
 class DecoderWithAttention(nn.Module):
     """
@@ -122,9 +161,10 @@ class DecoderWithAttention(nn.Module):
         self.adaptive_att = adaptive_att
 
         if self.adaptive_att:
+            self.adaptive_attention = Adaptive_Attention(encoder_dim, decoder_dim, attention_dim)  # attention network
             self.decode_step_adaptive = nn.LSTMCell(embed_dim, decoder_dim, bias=True)  # decoding LSTMCell
-            self.embedding_sentinel = nn.Linear(embed_dim, encoder_dim)  # linear layer to transform encoded image
-            self.decoder_sentinel = nn.Linear(decoder_dim, encoder_dim)  # linear layer to transform decoder's output
+            self.affine_embed = nn.Linear(embed_dim, decoder_dim)  # linear layer to transform embeddings
+            self.affine_decoder = nn.Linear(decoder_dim, decoder_dim)  # linear layer to transform decoder's output
             self.fc_encoder = nn.Linear(encoder_dim, vocab_size)  # linear layer to find scores over vocabulary
 
         self.init_weights()  # initialize some layers with the uniform distribution
@@ -227,19 +267,15 @@ class DecoderWithAttention(nn.Module):
 
             else:
                 # g_t = sigmoid(W_x * x_t + W_h * h_(t−1))
-                g_t = self.sigmoid(self.embedding_sentinel(self.dropout(embeddings[:batch_size_t, t, :]))
-                                   + self.decoder_sentinel(self.dropout(h[:batch_size_t])))    # (batch_size_t, embed_dim)
+                g_t = self.sigmoid(self.affine_embed(embeddings[:batch_size_t, t, :])
+                                   + self.affine_decoder(h[:batch_size_t]))    # (batch_size_t, decoder_dim)
 
                 # s_t = g_t * tanh(c_t)
-                s_t = g_t * torch.tanh(self.decoder_sentinel(c[:batch_size_t]))
-                encoder_out_sentinel = torch.cat([encoder_out[:batch_size_t], s_t.unsqueeze(1)], dim=1)   # (batch_size_t, num_pixels + 1, encoder_dim)
+                s_t = g_t * torch.tanh(c[:batch_size_t])   # (batch_size_t, decoder_dim)
 
                 h, c = self.decode_step_adaptive(
                     embeddings[:batch_size_t, t, :],(h[:batch_size_t], c[:batch_size_t]))  # (batch_size_t, decoder_dim)
-                attention_weighted_encoding, alpha = self.attention(encoder_out_sentinel[:batch_size_t], h[:batch_size_t])
-
-                gate = self.sigmoid(self.f_beta(h[:batch_size_t]))  # gating scalar, (batch_size_t, encoder_dim)
-                attention_weighted_encoding = gate * attention_weighted_encoding
+                attention_weighted_encoding, alpha = self.adaptive_attention(encoder_out[:batch_size_t], h[:batch_size_t], s_t)
 
                 preds = self.fc(self.dropout(h)) + self.fc_encoder(self.dropout(attention_weighted_encoding))
                 predictions[:batch_size_t, t, :] = preds

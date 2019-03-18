@@ -120,16 +120,13 @@ def evaluate(args):
 
                 if decoder.adaptive_att:
 
-                    g_t = decoder.sigmoid(decoder.embedding_sentinel(embeddings) + decoder.decoder_sentinel(h))
-                    s_t = g_t * torch.tanh(decoder.decoder_sentinel(c))
+                    g_t = decoder.sigmoid(decoder.affine_embed(embeddings) + decoder.affine_decoder(h))
+                    s_t = g_t * torch.tanh(c)
 
-                    encoder_out_sentinel = torch.cat([encoder_out, s_t.unsqueeze(1)], dim=1)
                     h, c = decoder.decode_step_adaptive(embeddings, (h, c))  # (batch_size_t, decoder_dim)
 
-                    attention_weighted_encoding, _ = decoder.attention(encoder_out_sentinel, h)
-
-                    gate = decoder.sigmoid(decoder.f_beta(h))  # gating scalar, (batch_size_t, encoder_dim)
-                    attention_weighted_encoding = gate * attention_weighted_encoding
+                    attention_weighted_encoding, alpha = decoder.adaptive_attention(encoder_out, h, s_t)
+                    alpha = alpha[:, :-1].view(-1, enc_image_size, enc_image_size)
 
                     scores = decoder.fc(h) + decoder.fc_encoder(attention_weighted_encoding)
 
