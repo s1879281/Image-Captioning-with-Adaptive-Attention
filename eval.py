@@ -83,7 +83,16 @@ def evaluate(args):
         image = image.to(device)  # (1, 3, 256, 256)
 
         # Encode
-        encoder_out = encoder(image)  # (1, enc_image_size, enc_image_size, encoder_dim)
+        try:
+            if decoder.adaptive_att:
+                encoder_out, v_g = encoder(image)  # (1, enc_image_size, enc_image_size, encoder_dim)
+
+            else:
+                encoder_out = encoder(image)  # (1, enc_image_size, enc_image_size, encoder_dim)
+
+        except AttributeError:
+            encoder_out = encoder(image)  # (1, enc_image_size, enc_image_size, encoder_dim)
+
         enc_image_size = encoder_out.size(1)
         encoder_dim = encoder_out.size(3)
 
@@ -123,10 +132,9 @@ def evaluate(args):
                     g_t = decoder.sigmoid(decoder.affine_embed(embeddings) + decoder.affine_decoder(h))
                     s_t = g_t * torch.tanh(c)
 
-                    h, c = decoder.decode_step_adaptive(embeddings, (h, c))  # (batch_size_t, decoder_dim)
+                    h, c = decoder.decode_step_adaptive(torch.cat([embeddings, v_g.expand_as(embeddings)], dim=1), (h, c))  # (batch_size_t, decoder_dim)
 
                     attention_weighted_encoding, alpha = decoder.adaptive_attention(encoder_out, h, s_t)
-                    alpha = alpha[:, :-1].view(-1, enc_image_size, enc_image_size)
 
                     scores = decoder.fc(h) + decoder.fc_encoder(attention_weighted_encoding)
 

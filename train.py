@@ -6,7 +6,7 @@ import torch.utils.data
 import torchvision.transforms as transforms
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence
-from models import Encoder, DecoderWithAttention
+from models import Encoder, DecoderWithAttention, Adaptive_Encoder
 from datasets import *
 from utils import *
 from nltk.translate.bleu_score import corpus_bleu
@@ -60,7 +60,12 @@ def main(args):
                                        adaptive_att=args.adaptive)
         decoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, decoder.parameters()),
                                              lr=decoder_lr)
-        encoder = Encoder()
+        if args.adaptive:
+            encoder = Adaptive_Encoder(encoded_image_size=14,
+                                       embed_dim=emb_dim,
+                                       decoder_dim=decoder_dim)
+        else:
+            encoder = Encoder()
         encoder.fine_tune(fine_tune_encoder)
         encoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, encoder.parameters()),
                                              lr=encoder_lr) if fine_tune_encoder else None

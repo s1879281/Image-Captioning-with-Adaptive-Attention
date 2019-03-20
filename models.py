@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 import torchvision
+import torch.nn.functional as F
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -51,6 +52,50 @@ class Encoder(nn.Module):
                 p.requires_grad = fine_tune
 
 
+class Adaptive_Encoder(Encoder):
+    """
+    Adaptive_Encoder.
+    """
+    def __init__(self, encoded_image_size, embed_dim, decoder_dim):
+        super(Adaptive_Encoder, self).__init__(encoded_image_size)
+        self.embed_dim = embed_dim
+        self.decoder_dim = decoder_dim
+
+        resnet = torchvision.models.resnet101(pretrained=True)  # pretrained ImageNet ResNet-101
+
+        # Remove linear and pool layers (since we're not doing classification)
+        modules = list(resnet.children())[:-2]
+        self.resnet = nn.Sequential(*modules)
+        self.dropout = nn.Dropout(0.5)
+
+        # Resize image to fixed size to allow input images of variable size
+        self.adaptive_pool = nn.AdaptiveAvgPool2d((encoded_image_size, encoded_image_size))
+
+        self.avgpool = nn.AvgPool2d(encoded_image_size)
+        self.affine_embed = nn.Linear(2048, embed_dim)
+        self.affine_decoder = nn.Linear(2048, decoder_dim)
+        self.fine_tune()
+
+    def forward(self, images):
+        """
+        Forward propagation.
+
+        :param images: images, a tensor of dimensions (batch_size, 3, image_size, image_size)
+        :return: encoded images
+        """
+        out = self.resnet(images)  # (batch_size, 2048, image_size/32, image_size/32)
+        out = self.adaptive_pool(out)  # (batch_size, 2048, encoded_image_size, encoded_image_size)
+
+        a_g = self.avgpool(out)  # (batch_size, 2048)
+        a_g = a_g.view(a_g.size(0), -1)   # (batch_size, 2048)
+
+        out = out.permute(0, 2, 3, 1)  # (batch_size, encoded_image_size, encoded_image_size, 2048)
+        out = F.relu(self.affine_decoder(self.dropout(out)))
+        v_g = F.relu(self.affine_embed(self.dropout(a_g)))
+
+        return out, v_g
+
+
 class Attention(nn.Module):
     """
     Attention Network.
@@ -98,7 +143,6 @@ class Adaptive_Attention(Attention):
         """
         super(Adaptive_Attention, self).__init__(encoder_dim, decoder_dim, attention_dim)
         self.sentinel_att = nn.Linear(decoder_dim, attention_dim)  # linear layer to transform decoder's output
-        self.affine_encoder = nn.Linear(decoder_dim, encoder_dim)  # linear layer to transform s_t
         self.softmax = nn.Softmax(dim=1)  # softmax layer to calculate weights
 
     def forward(self, encoder_out, decoder_hidden, s_t):
@@ -119,7 +163,7 @@ class Adaptive_Attention(Attention):
         alpha = self.softmax(att)  # (batch_size, num_pixels + 1)
 
         # c_hat_t = beta * s_t + （1-beta）* c_t
-        attention_weighted_s_t = self.affine_encoder(s_t) * alpha[:, -1].unsqueeze(1)
+        attention_weighted_s_t = s_t * alpha[:, -1].unsqueeze(1)
         attention_weighted_encoding = (encoder_out * alpha[:, :-1].unsqueeze(2)).sum(dim=1) + attention_weighted_s_t  # (batch_size, encoder_dim)
 
         return attention_weighted_encoding, alpha
@@ -141,31 +185,33 @@ class DecoderWithAttention(nn.Module):
         """
         super(DecoderWithAttention, self).__init__()
 
+        self.adaptive_att = adaptive_att
         self.encoder_dim = encoder_dim
+        if self.adaptive_att:
+            self.encoder_dim = decoder_dim
         self.attention_dim = attention_dim
         self.embed_dim = embed_dim
         self.decoder_dim = decoder_dim
         self.vocab_size = vocab_size
         self.dropout = dropout
 
-        self.attention = Attention(encoder_dim, decoder_dim, attention_dim)  # attention network
+        self.attention = Attention(self.encoder_dim, decoder_dim, attention_dim)  # attention network
 
         self.embedding = nn.Embedding(vocab_size, embed_dim)  # embedding layer
         self.dropout = nn.Dropout(p=self.dropout)
         self.decode_step = nn.LSTMCell(embed_dim + encoder_dim, decoder_dim, bias=True)  # decoding LSTMCell
-        self.init_h = nn.Linear(encoder_dim, decoder_dim)  # linear layer to find initial hidden state of LSTMCell
-        self.init_c = nn.Linear(encoder_dim, decoder_dim)  # linear layer to find initial cell state of LSTMCell
-        self.f_beta = nn.Linear(decoder_dim, encoder_dim)  # linear layer to create a sigmoid-activated gate
+        self.init_h = nn.Linear(self.encoder_dim, decoder_dim)  # linear layer to find initial hidden state of LSTMCell
+        self.init_c = nn.Linear(self.encoder_dim, decoder_dim)  # linear layer to find initial cell state of LSTMCell
+        self.f_beta = nn.Linear(decoder_dim, self.encoder_dim)  # linear layer to create a sigmoid-activated gate
         self.sigmoid = nn.Sigmoid()
         self.fc = nn.Linear(decoder_dim, vocab_size)  # linear layer to find scores over vocabulary
-        self.adaptive_att = adaptive_att
 
         if self.adaptive_att:
-            self.adaptive_attention = Adaptive_Attention(encoder_dim, decoder_dim, attention_dim)  # attention network
-            self.decode_step_adaptive = nn.LSTMCell(embed_dim, decoder_dim, bias=True)  # decoding LSTMCell
+            self.adaptive_attention = Adaptive_Attention(self.encoder_dim, decoder_dim, attention_dim)  # attention network
+            self.decode_step_adaptive = nn.LSTMCell(2 * embed_dim, decoder_dim, bias=True)  # decoding LSTMCell
             self.affine_embed = nn.Linear(embed_dim, decoder_dim)  # linear layer to transform embeddings
             self.affine_decoder = nn.Linear(decoder_dim, decoder_dim)  # linear layer to transform decoder's output
-            self.fc_encoder = nn.Linear(encoder_dim, vocab_size)  # linear layer to find scores over vocabulary
+            self.fc_encoder = nn.Linear(self.encoder_dim, vocab_size)  # linear layer to find scores over vocabulary
 
         self.init_weights()  # initialize some layers with the uniform distribution
 
@@ -220,12 +266,15 @@ class DecoderWithAttention(nn.Module):
         :return: scores for vocabulary, sorted encoded captions, decode lengths, weights, sort indices
         """
 
+        # Flatten image
+        if self.adaptive_att:
+            encoder_out, v_g = encoder_out
+
         batch_size = encoder_out.size(0)
         encoder_dim = encoder_out.size(-1)
-        vocab_size = self.vocab_size
-
-        # Flatten image
         encoder_out = encoder_out.view(batch_size, -1, encoder_dim)  # (batch_size, num_pixels, encoder_dim)
+
+        vocab_size = self.vocab_size
         num_pixels = encoder_out.size(1)
 
         # Sort input data by decreasing lengths; why? apparent below
@@ -274,7 +323,8 @@ class DecoderWithAttention(nn.Module):
                 s_t = g_t * torch.tanh(c[:batch_size_t])   # (batch_size_t, decoder_dim)
 
                 h, c = self.decode_step_adaptive(
-                    embeddings[:batch_size_t, t, :],(h[:batch_size_t], c[:batch_size_t]))  # (batch_size_t, decoder_dim)
+                    torch.cat([embeddings[:batch_size_t, t, :], v_g[:batch_size_t, :]], dim=1),
+                               (h[:batch_size_t], c[:batch_size_t]))  # (batch_size_t, decoder_dim)
                 attention_weighted_encoding, alpha = self.adaptive_attention(encoder_out[:batch_size_t], h[:batch_size_t], s_t)
 
                 preds = self.fc(self.dropout(h)) + self.fc_encoder(self.dropout(attention_weighted_encoding))
