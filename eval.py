@@ -21,8 +21,8 @@ def get_args():
 
     parser = argparse.ArgumentParser(description='Evaluation')
 
-    parser.add_argument('--checkpoint_folder', '-cf', default='best_checkpoint', help='path to checkpoint')
-    parser.add_argument('--dataset', '-d', default='coco', help='dataset')
+    parser.add_argument('--checkpoint_folder', '-cf', default='.', help='path to checkpoint')
+    parser.add_argument('--dataset', '-d', default='flickr8k', help='dataset')
     parser.add_argument('--beam_size', '-b', default=5, type=int, help='beam size for beam search')
 
     args = parser.parse_args()
@@ -83,7 +83,16 @@ def evaluate(args):
         image = image.to(device)  # (1, 3, 256, 256)
 
         # Encode
-        encoder_out = encoder(image)  # (1, enc_image_size, enc_image_size, encoder_dim)
+        try:
+            if decoder.adaptive_att:
+                encoder_out, v_g = encoder(image)  # (1, enc_image_size, enc_image_size, encoder_dim)
+
+            else:
+                encoder_out = encoder(image)  # (1, enc_image_size, enc_image_size, encoder_dim)
+
+        except AttributeError:
+            encoder_out = encoder(image)  # (1, enc_image_size, enc_image_size, encoder_dim)
+
         enc_image_size = encoder_out.size(1)
         encoder_dim = encoder_out.size(3)
 
@@ -116,18 +125,45 @@ def evaluate(args):
 
             embeddings = decoder.embedding(k_prev_words).squeeze(1)  # (s, embed_dim)
 
-            awe, _ = decoder.attention(encoder_out, h)  # (s, encoder_dim), (s, num_pixels)
+            try:
 
-            gate = decoder.sigmoid(decoder.f_beta(h))  # gating scalar, (s, encoder_dim)
-            awe = gate * awe
+                if decoder.adaptive_att:
 
-            h, c = decoder.decode_step(torch.cat([embeddings, awe], dim=1), (h, c))  # (s, decoder_dim)
+                    g_t = decoder.sigmoid(decoder.affine_embed(embeddings) + decoder.affine_decoder(h))
+                    s_t = g_t * torch.tanh(c)
 
-            scores = decoder.fc(h)  # (s, vocab_size)
+                    h, c = decoder.decode_step_adaptive(torch.cat([embeddings, v_g.expand_as(embeddings)], dim=1), (h, c))  # (batch_size_t, decoder_dim)
+
+                    attention_weighted_encoding, alpha = decoder.adaptive_attention(encoder_out, h, s_t)
+
+                    scores = decoder.fc(h) + decoder.fc_encoder(attention_weighted_encoding)
+
+                else:
+
+                    awe, _ = decoder.attention(encoder_out, h)  # (s, encoder_dim), (s, num_pixels)
+
+                    gate = decoder.sigmoid(decoder.f_beta(h))  # gating scalar, (s, encoder_dim)
+                    awe = gate * awe
+
+                    h, c = decoder.decode_step(torch.cat([embeddings, awe], dim=1), (h, c))  # (s, decoder_dim)
+
+                    scores = decoder.fc(h)  # (s, vocab_size)
+
+            except AttributeError:
+
+                awe, _ = decoder.attention(encoder_out, h)  # (s, encoder_dim), (s, num_pixels)
+
+                gate = decoder.sigmoid(decoder.f_beta(h))  # gating scalar, (s, encoder_dim)
+                awe = gate * awe
+
+                h, c = decoder.decode_step(torch.cat([embeddings, awe], dim=1), (h, c))  # (s, decoder_dim)
+
+                scores = decoder.fc(h)  # (s, vocab_size)
+
+
             scores = F.log_softmax(scores, dim=1)
-
-            # Add
             scores = top_k_scores.expand_as(scores) + scores  # (s, vocab_size)
+
 
             # For the first step, all k points will have the same scores (since same k previous words, h, c)
             if step == 1:
