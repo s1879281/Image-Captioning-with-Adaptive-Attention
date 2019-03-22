@@ -22,9 +22,9 @@ def get_args():
     """
     parser = argparse.ArgumentParser(description='Generate Caption')
 
-    parser.add_argument('--checkpoint_folder', '-cf', default='best_checkpoint', help='path to checkpoint')
-    parser.add_argument('--dataset', '-d', default='coco', help='dataset')
-    parser.add_argument('--img', '-i', default='test_image.jpg', help='path to image')
+    parser.add_argument('--checkpoint_folder', '-cf', default='best_checkpoint_baseline', help='path to checkpoint')
+    parser.add_argument('--dataset', '-d', default='flickr30k', help='dataset')
+    parser.add_argument('--img', '-i', default='E:/dataset/Flicker8k_Dataset/199463720_329a802206.jpg', help='path to image')
     parser.add_argument('--beam_size', '-b', default=5, type=int, help='beam size for beam search')
     parser.add_argument('--dont_smooth', dest='smooth', action='store_false', help='do not smooth alpha overlay')
 
