@@ -6,7 +6,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Create input files')
 
     parser.add_argument('--dataset', '-d', default='coco', help='dataset')
-    parser.add_argument('--img_folder', '-i', default='image_captioning/train2014/', help='path to image')
+    parser.add_argument('--img_folder', '-i', default='image_folder', help='path to image')
     parser.add_argument('--caption_folder', '-cf', default='caption_datasets', help='path to captions')
 
     args = parser.parse_args()
