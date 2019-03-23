@@ -262,9 +262,8 @@ class Image_captioner():
 
 if __name__ == '__main__':
     coco_captioner = Image_captioner(dataset='flickr8k', checkpoint_folder='.')
-    image = 'test_image2.jpg'
+    image = 'image.jpg'
     seq, alphas, words = coco_captioner.generate_caption(image)
-    alphas_data = alphas.view(-1, 196).sum(dim=1)
-    print(alphas_data)
+
     # Visualize caption and attention of best sequence
     visualize_att(image, seq, alphas, coco_captioner.rev_word_map, coco_captioner.smooth)
