@@ -42,7 +42,7 @@ python create_input_files.py -d coco -i [YOUR-IMAGE-FLODER]
 ```
 
 ## Training
-Use the following command to training the model:
+Use the following command to training the model on MSCOCO dataset:
 ```
 python train.py -d coco
 ```
@@ -57,7 +57,7 @@ You can feel free to choose different beam sizes during evaluation. Use the foll
 ```
 python eval.py -d coco -cf [PATH-TO-CHECKPOINT] -b 5
 ```
-Note that the best checkpoint is based on the BLEU-4 score.
+Note that the best checkpoint in training process is based on the BLEU-4 score.
 
 
 ## Captioning
