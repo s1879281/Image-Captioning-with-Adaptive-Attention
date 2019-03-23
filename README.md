@@ -1,4 +1,4 @@
-#Image-Captioning-with-Adaptive-Attention
+# Image-Captioning-with-Adaptive-Attention
 
 This is a PyTorch implementation of [Knowing When to
 Look: Adaptive
@@ -6,7 +6,7 @@ Attention via A Visual Sentinel for Image Captioning](https://arxiv.org/pdf/1612
 
 ![example](https://github.com/s1879281/Image-Captioning-with-Adaptive-Attention/blob/master/images/example.jpg)
 
-##Dataset
+## Dataset
 
 We will use Andrej Karpathy's training, validation, and test splits. To download the zip file, you can use the following command:
 ```
@@ -21,7 +21,7 @@ You might want to use the following command to download the MSCOCO dataset:
 wget http://images.cocodataset.org/zips/train2014.zip
 wget http://images.cocodataset.org/zips/val2014.zip
 ```
-##Reference
+## Reference
 If you use this code as part of any published research, please acknowledge the following paper:
 
 ```
@@ -33,5 +33,5 @@ year = {2017}
 }
 ```
 
-##Acknowledgement
+## Acknowledgement
 The code is developed based on [a-PyTorch-Tutorial-to-Image-Captioning](https://github.com/sgrvinod/a-PyTorch-Tutorial-to-Image-Captioning).
